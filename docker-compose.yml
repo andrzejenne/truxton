@@ -1,0 +1,6 @@
+version: '3.2'
+services:
+  builder:
+    image: theypsilon/quartus-lite-c5:17.0.docker0
+    volumes:
+      - .:/app
