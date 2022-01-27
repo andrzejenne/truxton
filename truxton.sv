@@ -784,8 +784,8 @@ T80pa u_cpu(
 wire prog_rom_1_cs   = ( cpu_a <= 24'h03ffff ) & !cpu_as_n  ;
 // wire prog_rom_2_cs   = ( cpu_a >= 24'h040000 && cpu_a <= 24'h07ffff ) & !cpu_as_n  ;
 
-wire scroll_ofs_x_cs = ( cpu_a >= 24'h0c0000 && cpu_a <= 24'h0c0001 ) & !cpu_as_n  ;
-wire scroll_ofs_y_cs = ( cpu_a >= 24'h0c0002 && cpu_a <= 24'h0c0003 ) & !cpu_as_n  ;
+wire scroll_ofs_x_cs = ( cpu_a >= 24'h1c0000 && cpu_a <= 24'h1c0001 ) & !cpu_as_n  ;
+wire scroll_ofs_y_cs = ( cpu_a >= 24'h1c0002 && cpu_a <= 24'h1c0003 ) & !cpu_as_n  ;
 
 wire ram_cs          = ( cpu_a >= 24'h080000 && cpu_a <= 24'h083fff ) & !cpu_as_n  ;
 
