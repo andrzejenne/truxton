@@ -1440,6 +1440,8 @@ wire sound_rom_1_ctrl_valid;
 
 // wire [23:0] rom_2_addr = cpu_a - 24'h040000  ;
 
+wire [23:0] rom_1_addr = cpu_a - 24'h000000  ;
+
 // sdram priority based rom controller
 // is a oe needed?
 rom_controller rom_controller

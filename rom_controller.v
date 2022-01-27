@@ -259,11 +259,11 @@ end
 reg sdram_valid_reg;
 
 // select cpu data input based on what is active
-assign prog_rom_1_data_valid  = prog_rom_1_cs &  ( prog_rom_1_ctrl_hit  | (pending_rom == PROG_ROM_1  ?  sdram_valid  : 0) ) & ~reset;
-// assign prog_rom_2_data_valid  = prog_rom_2_cs &  ( prog_rom_2_ctrl_hit  | (pending_rom == PROG_ROM_2  ?  sdram_valid  : 0) ) & ~reset;
-assign tile_rom_data_valid    = tile_rom_cs   &  ( tile_rom_ctrl_hit    | (pending_rom == TILE_ROM    ?  sdram_valid  : 0) ) & ~reset;
-assign sprite_rom_data_valid  = sprite_rom_cs &  ( sprite_rom_ctrl_hit  | (pending_rom == SPRITE_ROM  ?  sdram_valid  : 0) ) & ~reset;
-assign sound_rom_1_data_valid = sound_rom_1_cs & ( sound_rom_1_ctrl_hit | (pending_rom == SOUND_ROM_1 ?  sdram_valid  : 0) ) & ~reset;
+assign prog_rom_1_data_valid  = prog_rom_1_cs &  ( prog_rom_1_ctrl_hit  | (pending_rom == PROG_ROM_1  ?  sdram_valid  : 0) );
+// assign prog_rom_2_data_valid  = prog_rom_2_cs &  ( prog_rom_2_ctrl_hit  | (pending_rom == PROG_ROM_2  ?  sdram_valid  : 0) );
+assign tile_rom_data_valid    = tile_rom_cs   &  ( tile_rom_ctrl_hit    | (pending_rom == TILE_ROM    ?  sdram_valid  : 0) );
+assign sprite_rom_data_valid  = sprite_rom_cs &  ( sprite_rom_ctrl_hit  | (pending_rom == SPRITE_ROM  ?  sdram_valid  : 0) );
+assign sound_rom_1_data_valid = sound_rom_1_cs & ( sound_rom_1_ctrl_hit | (pending_rom == SOUND_ROM_1 ?  sdram_valid  : 0) );
 
 always @ (*) begin
 
