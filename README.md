@@ -5,7 +5,9 @@ Based on work of Darren_O's Zero Wing
 
 ## Actual State
 
-not working ! It looks like it is stuck after rom load. 
+not working ! Rom Ram Sound check OK, but does not run after.
+
+screen has incorrect rotation, it's based on zero wing.
 
 ## What has been done
 
@@ -31,3 +33,4 @@ rbf can be found in output_files
 put truxton.rbf into /media/fat/_Arcade/cores
 put truxton.mra into /media/fat/_Arcade
 
+run update_all or put truxton.zip in /media/fat/games/mame 
