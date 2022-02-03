@@ -1,19 +1,27 @@
 # Truxton/Tatsujin
-MiSTerFPGA Truxton/Tatsujin
-
-Based on work of Darren_O's Zero Wing
+MiSTerFPGA Truxton/Tatsujin is a standalone core extracted from work of [Darren_O's Zero Wing core](https://github.com/va7deo/zerowing) and work done by 
+[atrac17](https://github.com/atrac17/zerowing) and [blackwing](https://github.com/blackwine/zerowing).
 
 ## Actual State
 
-not working ! Rom Ram Sound check OK, but does not run after.
+Working without screwed tiles, thanks to blackwine.
 
-screen has incorrect rotation, it's based on zero wing.
+I have discovered, int_en_cs address was set differently, which prevented proper boot.
+
+Also the scroll_y_offset was wrong. It should be 16 for truxton. 
 
 ## What has been done
 
-Memory mapping has been updated using mame toaplan1.cpp driver.
+### 2.2.2022
 
-Second rom (prog_rom_2) and whole segment in rom_controller.v has been disabled.
+* merged whole zerowing work
+* removed unnecessary parts from the chip_select.v
+* updated bcu code according to blk_yn findings
+
+### initial version:
+
+* Memory mapping has been updated using mame toaplan1.cpp driver.
+* Second rom (prog_rom_2) and whole segment in rom_controller.v has been disabled.
 
 ## Building
 
@@ -29,8 +37,14 @@ cd /app
 rbf can be found in output_files
 
 ## Installation
+* put releases/truxton.rbf into /media/fat/_Arcade/cores
+* put releases/Truxton - Tatsujin - standalone core.mra into /media/fat/_Arcade
+* run update_all or put truxton.zip in /media/fat/games/mame 
 
-put truxton.rbf into /media/fat/_Arcade/cores
-put truxton.mra into /media/fat/_Arcade
+I take no responsibility for any damage done by using of this core.
 
-run update_all or put truxton.zip in /media/fat/games/mame 
+This repo is solely for my research, you can use it at your own risk.
+
+# TODO
+* study the progress made on zerowing core, maybe I will be able to build own fpga core some day.
+* archive repository once the zerowing core is released

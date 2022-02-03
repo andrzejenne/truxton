@@ -71,10 +71,10 @@ entity rom_controller is
     prog_rom_1_data : out std_logic_vector(PROG_ROM_1_DATA_WIDTH-1 downto 0);
 
     -- program ROM #2 interface
---    prog_rom_2_cs   : in std_logic := '1';
---    prog_rom_2_oe   : in std_logic := '1';
---    prog_rom_2_addr : in unsigned(PROG_ROM_2_ADDR_WIDTH-1 downto 0);
---    prog_rom_2_data : out std_logic_vector(PROG_ROM_2_DATA_WIDTH-1 downto 0);
+    prog_rom_2_cs   : in std_logic := '1';
+    prog_rom_2_oe   : in std_logic := '1';
+    prog_rom_2_addr : in unsigned(PROG_ROM_2_ADDR_WIDTH-1 downto 0);
+    prog_rom_2_data : out std_logic_vector(PROG_ROM_2_DATA_WIDTH-1 downto 0);
 
     -- character ROM interface
     char_rom_cs   : in std_logic := '1';
@@ -137,7 +137,7 @@ architecture arch of rom_controller is
 
   -- ROM request signals
   signal prog_rom_1_ctrl_req  : std_logic;
---  signal prog_rom_2_ctrl_req  : std_logic;
+  signal prog_rom_2_ctrl_req  : std_logic;
   signal char_rom_ctrl_req    : std_logic;
   signal sprite_rom_ctrl_req  : std_logic;
   signal fg_rom_ctrl_req      : std_logic;
@@ -147,7 +147,7 @@ architecture arch of rom_controller is
 
   -- ROM acknowledge signals
   signal prog_rom_1_ctrl_ack  : std_logic;
---  signal prog_rom_2_ctrl_ack  : std_logic;
+  signal prog_rom_2_ctrl_ack  : std_logic;
   signal char_rom_ctrl_ack    : std_logic;
   signal sprite_rom_ctrl_ack  : std_logic;
   signal fg_rom_ctrl_ack      : std_logic;
@@ -157,7 +157,7 @@ architecture arch of rom_controller is
 
   -- ROM valid signals
   signal prog_rom_1_ctrl_valid  : std_logic;
---  signal prog_rom_2_ctrl_valid  : std_logic;
+  signal prog_rom_2_ctrl_valid  : std_logic;
   signal char_rom_ctrl_valid    : std_logic;
   signal sprite_rom_ctrl_valid  : std_logic;
   signal fg_rom_ctrl_valid      : std_logic;
@@ -167,7 +167,7 @@ architecture arch of rom_controller is
 
   -- address mux signals
   signal prog_rom_1_ctrl_addr  : unsigned(SDRAM_CTRL_ADDR_WIDTH-1 downto 0);
---  signal prog_rom_2_ctrl_addr  : unsigned(SDRAM_CTRL_ADDR_WIDTH-1 downto 0);
+  signal prog_rom_2_ctrl_addr  : unsigned(SDRAM_CTRL_ADDR_WIDTH-1 downto 0);
   signal char_rom_ctrl_addr    : unsigned(SDRAM_CTRL_ADDR_WIDTH-1 downto 0);
   signal sprite_rom_ctrl_addr  : unsigned(SDRAM_CTRL_ADDR_WIDTH-1 downto 0);
   signal fg_rom_ctrl_addr      : unsigned(SDRAM_CTRL_ADDR_WIDTH-1 downto 0);
@@ -216,25 +216,25 @@ begin
     rom_data   => prog_rom_1_data
   );
 
---  prog_rom_2_segment : entity work.segment
---  generic map (
---    ROM_ADDR_WIDTH => PROG_ROM_2_ADDR_WIDTH,
---    ROM_DATA_WIDTH => PROG_ROM_2_DATA_WIDTH,
---    ROM_OFFSET     => PROG_ROM_2_OFFSET
---  )
---  port map (
---    reset      => reset,
---    clk        => clk,
---    cs         => prog_rom_2_cs and not ioctl_download,
---    oe         => prog_rom_2_oe,
---    ctrl_addr  => prog_rom_2_ctrl_addr,
---    ctrl_req   => prog_rom_2_ctrl_req,
---    ctrl_ack   => prog_rom_2_ctrl_ack,
---   ctrl_valid => prog_rom_2_ctrl_valid,
---    ctrl_data  => sdram_q,
---    rom_addr   => prog_rom_2_addr,
---    rom_data   => prog_rom_2_data
---  );
+  prog_rom_2_segment : entity work.segment
+  generic map (
+    ROM_ADDR_WIDTH => PROG_ROM_2_ADDR_WIDTH,
+    ROM_DATA_WIDTH => PROG_ROM_2_DATA_WIDTH,
+    ROM_OFFSET     => PROG_ROM_2_OFFSET
+  )
+  port map (
+    reset      => reset,
+    clk        => clk,
+    cs         => prog_rom_2_cs and not ioctl_download,
+    oe         => prog_rom_2_oe,
+    ctrl_addr  => prog_rom_2_ctrl_addr,
+    ctrl_req   => prog_rom_2_ctrl_req,
+    ctrl_ack   => prog_rom_2_ctrl_ack,
+    ctrl_valid => prog_rom_2_ctrl_valid,
+    ctrl_data  => sdram_q,
+    rom_addr   => prog_rom_2_addr,
+    rom_data   => prog_rom_2_data
+  );
 
   char_rom_segment : entity work.segment
   generic map (
@@ -381,7 +381,7 @@ begin
 
   -- mux the next ROM in priority order
   next_rom <= PROG_ROM_1  when prog_rom_1_ctrl_req  = '1' else
---              PROG_ROM_2  when prog_rom_2_ctrl_req  = '1' else
+              PROG_ROM_2  when prog_rom_2_ctrl_req  = '1' else
               SOUND_ROM_1 when sound_rom_1_ctrl_req = '1' else
               CHAR_ROM    when char_rom_ctrl_req    = '1' else
               SPRITE_ROM  when sprite_rom_ctrl_req  = '1' else
@@ -392,7 +392,7 @@ begin
 
   -- route SDRAM acknowledge signal to the current ROM
   prog_rom_1_ctrl_ack  <= sdram_ack when rom = PROG_ROM_1  else '0';
---  prog_rom_2_ctrl_ack  <= sdram_ack when rom = PROG_ROM_2  else '0';
+  prog_rom_2_ctrl_ack  <= sdram_ack when rom = PROG_ROM_2  else '0';
   char_rom_ctrl_ack    <= sdram_ack when rom = CHAR_ROM    else '0';
   sprite_rom_ctrl_ack  <= sdram_ack when rom = SPRITE_ROM  else '0';
   fg_rom_ctrl_ack      <= sdram_ack when rom = FG_ROM      else '0';
@@ -402,7 +402,7 @@ begin
 
   -- route SDRAM valid signal to the pending ROM
   prog_rom_1_ctrl_valid  <= sdram_valid when pending_rom = PROG_ROM_1  else '0';
---  prog_rom_2_ctrl_valid  <= sdram_valid when pending_rom = PROG_ROM_2  else '0';
+  prog_rom_2_ctrl_valid  <= sdram_valid when pending_rom = PROG_ROM_2  else '0';
   char_rom_ctrl_valid    <= sdram_valid when pending_rom = CHAR_ROM    else '0';
   sprite_rom_ctrl_valid  <= sdram_valid when pending_rom = SPRITE_ROM  else '0';
   fg_rom_ctrl_valid      <= sdram_valid when pending_rom = FG_ROM      else '0';
@@ -412,7 +412,7 @@ begin
 
   -- mux ROM request
   ctrl_req <= prog_rom_1_ctrl_req or
---              prog_rom_2_ctrl_req or
+              prog_rom_2_ctrl_req or
               char_rom_ctrl_req or
               sprite_rom_ctrl_req or
               fg_rom_ctrl_req or
@@ -423,7 +423,7 @@ begin
   -- mux SDRAM address in priority order
   sdram_addr <= download_addr         when ioctl_download       = '1' else
                 prog_rom_1_ctrl_addr  when prog_rom_1_ctrl_req  = '1' else
---                prog_rom_2_ctrl_addr  when prog_rom_2_ctrl_req  = '1' else
+                prog_rom_2_ctrl_addr  when prog_rom_2_ctrl_req  = '1' else
                 sound_rom_1_ctrl_addr when sound_rom_1_ctrl_req = '1' else
                 char_rom_ctrl_addr    when char_rom_ctrl_req    = '1' else
                 sprite_rom_ctrl_addr  when sprite_rom_ctrl_req  = '1' else

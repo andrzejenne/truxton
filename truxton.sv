@@ -32,7 +32,7 @@ module emu
     input         RESET,
 
     //Must be passed to hps_io module
-    inout  [45:0] HPS_BUS,
+    inout  [47:0] HPS_BUS,
 
     //Base video clock. Usually equals to CLK_SYS.
     output        CLK_VIDEO,
@@ -58,6 +58,7 @@ module emu
 
     input  [11:0] HDMI_WIDTH,
     input  [11:0] HDMI_HEIGHT,
+    output        HDMI_FREEZE,
 
 `ifdef MISTER_FB
     // Use framebuffer in DDRAM (USE_FB=1 in qsf)
@@ -180,6 +181,7 @@ assign {UART_RTS, UART_TXD, UART_DTR} = 0;
 
 assign VGA_F1    = 0;
 assign VGA_SCALER= 0;
+assign HDMI_FREEZE = 0;
 
 assign USER_OUT  = '1;
 assign AUDIO_MIX = 0;
@@ -198,42 +200,31 @@ wire [2:0] scan_lines = status[6:4];
 // 01234567890123456789012345678901 23456789012345678901234567890123
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
 
-
-// todo: m
-wire [7:0] dipA = status[17:10];
-wire [7:0] dipB = status[25:18];
-wire [7:0] dipC = { 6'b0 , status[27:26] };
-
 assign VIDEO_ARX = (!aspect_ratio) ? (orientation  ? 8'd4 : 8'd3) : (aspect_ratio - 1'd1);
 assign VIDEO_ARY = (!aspect_ratio) ? (orientation  ? 8'd3 : 8'd4) : 12'd0;
 
 `include "build_id.v"
 localparam CONF_STR = {
     "A. Truxton;;",
-    "F,rom;",
-    "O12,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
-    "O3,Orientation,Horz,Vert;",
-    "O46,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
-    "OA,Cocktail,Off,On;",
-    "OB,Flip Screen,Off,On;",
-    "OC,Test Mode,Off,On;",
-    "OD,Demo Sounds,On,Off;",
+    "P1,Video Settings;",
+    "P1-;",
+    "P1O12,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
+    "P1O3,Orientation,Horz,Vert;",
+    "P1-;",
+    "P1O46,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+    "P1OOR,H-sync Adjust,0,1,2,3,4,5,6,7,-8,-7,-6,-5,-4,-3,-2,-1;",
+    "P1OSV,V-sync Adjust,0,1,2,3,4,5,6,7,-8,-7,-6,-5,-4,-3,-2,-1;",
+    "P1-;",
+    //"P1OB,Flip Screen,Off,On;",
+
+    "DIP;",
     "-;",
-    "OEF,Slot A,1c/1cr,1c/2cr,2c/1cr,2c/3cr;",
-    "OGH,Slot B,1c/1cr,1c/2cr,2c/1cr,2c/3cr;",
-    "OIJ,Difficulty,Normal,Easy,Hard,Extra Hard;",
-    "OKL,Extend,200K/500K,500K/1000K,500K,None;",
-    "OMN,Lifes,3,5,4,2;",
-    "OO,Invulnerable,Off,On;",
-    "OP,Continue Play,On,Off;",
-    "OQR,Region,Japan,USA,Europe 1,Europe 2;",
-    "-;",
+
     "R0,Reset;",
-    "J1,Fire,Capture,Start 1P,Start 2P,Coin,Pause;",
-    "jn,A,Start,Select,R,L;",
+    "J1,Button 1,Button 2,Button 3,Start,Coin,Pause;",
+    "jn,A,B,X,R,L,Start;",	       // name mapping
     "V,v",`BUILD_DATE
 };
-
 
 // CLOCKS
 
@@ -299,70 +290,59 @@ always @(posedge clk_sys) begin
     end
 end
 
+// Status bits
 wire [31:0] status;
-wire  [1:0] buttons;
+
+// Video settings
 wire        forced_scandoubler;
 wire        direct_video;
 
-wire [15:0] joystick_0, joystick_1;
-wire [15:0] joy = joystick_0 | joystick_1;
+wire [3:0] hs_offset = status[27:24];
+wire [3:0] vs_offset = status[31:28];
+
+// Controls
+wire  [1:0] buttons;
+wire [15:0] joy0, joy1;
 
 wire [21:0] gamma_bus;
 
-wire b_up      = joy[3];
-wire b_down    = joy[2];
-wire b_left    = joy[1];
-wire b_right   = joy[0];
-wire b_fire    = joy[4];
+wire       p1_up      = joy0[3];
+wire       p1_down    = joy0[2];
+wire       p1_left    = joy0[1];
+wire       p1_right   = joy0[0];
+wire [2:0] p1_buttons = joy0[6:4];
 
-wire b_up_2    = joy[3];
-wire b_down_2  = joy[2];
-wire b_left_2  = joy[1];
-wire b_right_2 = joy[0];
-wire b_fire_2  = joy[4];
+wire       p2_up      = joy1[3];
+wire       p2_down    = joy1[2];
+wire       p2_left    = joy1[1];
+wire       p2_right   = joy1[0];
+wire [2:0] p2_buttons = joy1[6:4];
 
-wire b_start1  = joy[5];
-wire b_start2  = joy[6];
-wire b_coin    = joy[7];
-wire b_pause   = joy[8];
+wire p1_start = joy0[7];
+wire p2_start = joy1[7];
+wire p1_coin  = joy0[8];
+wire p2_coin  = joy1[8];
+wire b_pause  = joy0[9] | joy1[9];
 
 // PAUSE SYSTEM
-reg                pause;                                    // Pause signal (active-high)
-reg                pause_toggle = 1'b0;                    // User paused (active-high)
-reg [31:0]        pause_timer;                            // Time since pause
-reg [31:0]        pause_timer_dim = 31'h11E1A300;    // Time until screen dim (10 seconds @ 48Mhz)
-reg             dim_video = 1'b0;                        // Dim video output (active-high)
+reg        pause;                                    // Pause signal (active-high)
+reg        pause_toggle = 1'b0;                    // User paused (active-high)
+reg [31:0] pause_timer;                            // Time since pause
+reg [31:0] pause_timer_dim = 31'h11E1A300;    // Time until screen dim (10 seconds @ 48Mhz)
+reg        dim_video = 1'b0;                        // Dim video output (active-high)
 
 // Pause when highscore module requires access, user has pressed pause, or OSD is open and option is set
 assign pause =  pause_toggle | (OSD_STATUS && ~status[7]);
 assign dim_video = (pause_timer >= pause_timer_dim);
 
-reg coin,start_1,start_2,up,down,left,right,fire,capture ;
-
-
 reg [1:0] adj_layer ;
-reg [15:0] prev_joy;
 reg [15:0] scroll_adj_x [3:0];
 reg [15:0] scroll_adj_y [3:0];
 reg layer_en [3:0];
 
 reg old_pause;
 
-always @ ( posedge clk_sys ) begin
-    right <= prev_joy[0];
-    left <= prev_joy[1];
-    down <= prev_joy[2];
-    up <= prev_joy[3];
-    fire <= prev_joy[4];
-    capture <= prev_joy[5];
-    start_1 <= prev_joy[6];
-    start_2 <= prev_joy[7];
-    coin <= prev_joy[8];
-end
-
 always @(posedge clk_sys) begin
-    prev_joy <= joy;
-
     old_pause <= b_pause;
     if (~old_pause & b_pause) begin
         pause_toggle <= ~pause_toggle;
@@ -388,12 +368,10 @@ wire        ioctl_wait;
 
 //
 
-hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
+hps_io #(.CONF_STR(CONF_STR)) hps_io
 (
     .clk_sys(clk_sys),
     .HPS_BUS(HPS_BUS),
-
-    .conf_str(CONF_STR),
 
     .buttons(buttons),
     .status(status),
@@ -411,8 +389,8 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
     .ioctl_index(ioctl_index),
     .ioctl_wait(ioctl_wait),
 
-    .joystick_0(joystick_0),
-    .joystick_1(joystick_1)
+    .joystick_0(joy0),
+    .joystick_1(joy1)
 );
 
 
@@ -430,8 +408,9 @@ wire [8:0] hc;
 wire [8:0] vc;
 
 wire no_rotate = orientation | direct_video;
-//wire rotate_ccw = 1;
-//screen_rotate screen_rotate (.*);
+wire rotate_ccw = 1;
+wire flip = 0;
+screen_rotate screen_rotate (.*);
 
 arcade_video #(320,24) arcade_video
 (
@@ -451,7 +430,7 @@ arcade_video #(320,24) arcade_video
 );
 
 wire reset;
-assign reset = RESET | status[0] | ioctl_download | buttons[1];
+assign reset = RESET | status[0] | (ioctl_download & !ioctl_index) | buttons[1];
 
 wire vid_clk = clk_7M;
 
@@ -459,10 +438,13 @@ video_timing video_timing (
     .clk( vid_clk ),       // pixel clock
     .reset(reset),      // reset
 
+    .hs_offset(hs_offset),
+    .vs_offset(vs_offset),
+
     .hc(hc),
     .vc(vc),
 
-    .hbl(hbl),
+    .hbl_delay(hbl),
     .vbl(vbl),
 
     .hsync(hsync),
@@ -514,7 +496,6 @@ reg  bgack_n = 1'b1;           // Bus grant ack
 reg  ipl0_n = 1'b1 ;            // Interrupt request signals
 reg  ipl1_n = 1'b1;
 reg  ipl2_n ;//= 1'b1;
-reg  m68k_int_ack;
 
 assign cpu_a[0] = 0;           // odd memory address should cause cpu exception
 
@@ -543,7 +524,7 @@ fx68k fx68k (
 
     // input
     .VPAn(cpu_as_n & ipl2_n),       // autovector int ack needs VPA low and DTACK high
-    .DTACKn(dtack_n | ~ipl2_n),     //
+    .DTACKn(dtack_n & ipl2_n),     //
     .BERRn(berr_n),
     .BRn(cpu_br_n),
     .BGACKn(bgack_n),
@@ -561,13 +542,11 @@ fx68k fx68k (
 always @ (posedge clk_sys) begin
 
     // tell 68k to wait for valid data. 0=ready 1=wait
-    dtack_n <= prog_rom_1_cs ? !prog_rom_1_data_valid :
-//        prog_rom_2_cs ? !prog_rom_2_data_valid :
-        ram_cs ? 0 : 0;  // always ack
+    // always ack when it's not program rom
+    dtack_n <= prog_rom_cs ? !prog_rom_data_valid : 0;
 
 // select cpu data input based on what is active
-    cpu_din <= prog_rom_1_cs ? prog_rom_1_data :
-//        prog_rom_2_cs ? prog_rom_2_data :
+    cpu_din <= prog_rom_cs ? prog_rom_data :
         ram_cs ? ram_dout :
         tile_palette_cs ?  tile_palette_cpu_dout :
         sprite_palette_cs ?  sprite_palette_cpu_dout :
@@ -581,11 +560,10 @@ always @ (posedge clk_sys) begin
         sprite_2_cs ? sprite_2_dout :
         sprite_3_cs ? sprite_3_dout :
         sprite_size_cs ? sprite_size_cpu_dout :
-        vblank_cs ? { 16 { vbl } } : // get vblank state
+        frame_done_cs ? { 16 { vbl } } : // get vblank state
         int_en_cs ? 16'hffff :
         16'd0;
 
-    m68k_int_ack <= ( cpu_as_n == 0 ) && ( cpu_fc == 3'b111 );  // ack high
 
 end
 
@@ -630,17 +608,19 @@ always @ (posedge clk_sys) begin
                 end
             end else if ( sound_ram_1_cs ) begin
                 z80_din <= z80_shared_dout;
-            end else if ( sound_io_00_cs ) begin
-                z80_din <= { 1'b0, 1'b0, capture, fire, right, left, down, up };
-            end else if ( sound_io_20_cs ) begin
-                z80_din <= dipA; //dsw1;
-            end else if ( sound_io_28_cs ) begin
-                z80_din <= dipB; //dsw2;
-            end else if ( sound_io_88_cs ) begin
-                z80_din <= dipC; //dsw3;
-            end else if ( sound_io_80_cs ) begin
-                z80_din <= { 1'b0, 1'b0, start_1, start_2, coin, 1'b0, 1'b0, 1'b0 };
-            end else if ( sound_io_a8_cs ) begin
+            end else if ( z80_p1_cs ) begin
+                z80_din <= { 1'b0, p1_buttons, p1_right, p1_left, p1_down, p1_up };
+            end else if ( z80_p2_cs ) begin
+                z80_din <= { 1'b0, p2_buttons, p2_right, p2_left, p2_down, p2_up };
+            end else if ( z80_dswa_cs ) begin
+                z80_din <= sw[0];
+            end else if ( z80_dswb_cs ) begin
+                z80_din <= sw[1];
+            end else if ( z80_tjump_cs ) begin
+                z80_din <= sw[3];
+            end else if ( z80_system_cs ) begin
+                z80_din <= { 1'b0, p2_start, p1_start, p2_coin, p1_coin, 1'b0, 1'b0, 1'b0 };
+            end else if ( z80_sound0_cs ) begin
                 z80_din <= opl_dout;
             end else begin
                 z80_din <= 8'h00;
@@ -649,10 +629,10 @@ always @ (posedge clk_sys) begin
 
         sound_wr <= 0 ;
         if ( z80_wr_n == 0 ) begin
-            if ( sound_io_a8_cs | sound_io_a9_cs ) begin
+            if ( z80_sound0_cs | z80_sound1_cs ) begin
                 sound_data  <= z80_dout;
-                sound_addr <= { 1'b0, sound_io_a9_cs }; // opl3
-//                sound_addr <= sound_io_a9_cs ;  // opl2 is single bit address
+                sound_addr <= { 1'b0, z80_sound1_cs }; // opl3
+//                sound_addr <= z80_sound1_cs ;  // opl2 is single bit address
                 sound_wr <= 1;
             end
         end
@@ -688,6 +668,24 @@ wire opl_irq_n;
 
 assign AUDIO_S = 1'b1 ;
 
+// opl2_intf opl
+// (
+//     .clk(clk_7M),
+//     .clk_opl(clk_14M),
+//     .rst_n(~reset),
+//
+//     .irq_n(opl_irq_n),
+//
+//     .addr(sound_addr),
+//     .din(sound_data),
+//     .dout(opl_dout),
+//     .we(sound_wr),
+//     .rd(sound_io_a8_cs & ~z80_rd_n ),
+
+//     .sample_l(AUDIO_L),
+//     .sample_r(AUDIO_R)
+// );
+
 opl3_intf opl
 (
     .clk(clk_7M),
@@ -700,7 +698,7 @@ opl3_intf opl
     .din(sound_data),
     .dout(opl_dout),
     .we(sound_wr),
-    .rd(sound_io_a8_cs & ~z80_rd_n ),
+    .rd(z80_sound0_cs & ~z80_rd_n ),
 
     .sample_l(AUDIO_L),
     .sample_r(AUDIO_R)
@@ -735,82 +733,44 @@ T80pa u_cpu(
     .REG        ()
 );
 
-// zerowing
-//    map(0x000000, 0x00ffff).rom();
-//    map(0x040000, 0x07ffff).rom();
-//    map(0x080000, 0x087fff).ram();
-//    map(0x0c0000, 0x0c0003).w(FUNC(toaplan1_state::tile_offsets_w));
-//    map(0x0c0006, 0x0c0006).w(FUNC(toaplan1_state::fcu_flipscreen_w));
-//  map(0x400000, 0x400001).r(FUNC(toaplan1_state::frame_done_r));
-//    map(0x400003, 0x400003).w(FUNC(toaplan1_state::intenable_w));
-//    map(0x400008, 0x40000f).w(FUNC(toaplan1_state::bcu_control_w));
-//    map(0x404000, 0x4047ff).ram().w(FUNC(toaplan1_state::bgpalette_w)).share("bgpalette");
-//    map(0x406000, 0x4067ff).ram().w(FUNC(toaplan1_state::fgpalette_w)).share("fgpalette");      // sprites
-//    map(0x440000, 0x440fff).rw(FUNC(toaplan1_state::shared_r), FUNC(toaplan1_state::shared_w)).umask16(0x00ff);
-//    map(0x480001, 0x480001).w(FUNC(toaplan1_state::bcu_flipscreen_w));
-//    map(0x480002, 0x480003).rw(FUNC(toaplan1_state::tileram_offs_r), FUNC(toaplan1_state::tileram_offs_w));
-//    map(0x480004, 0x480007).rw(FUNC(toaplan1_state::tileram_r), FUNC(toaplan1_state::tileram_w));
-//    map(0x480010, 0x48001f).rw(FUNC(toaplan1_state::scroll_regs_r), FUNC(toaplan1_state::scroll_regs_w));
-//    map(0x4c0000, 0x4c0001).r(FUNC(toaplan1_state::frame_done_r));
-//    map(0x4c0002, 0x4c0003).rw(FUNC(toaplan1_state::spriteram_offs_r), FUNC(toaplan1_state::spriteram_offs_w));
-//    map(0x4c0004, 0x4c0005).rw(FUNC(toaplan1_state::spriteram_r), FUNC(toaplan1_state::spriteram_w));
-//    map(0x4c0006, 0x4c0007).rw(FUNC(toaplan1_state::spritesizeram_r), FUNC(toaplan1_state::spritesizeram_w));
+// Chip select mux
+wire prog_rom_cs;
+wire scroll_ofs_x_cs;
+wire scroll_ofs_y_cs;
+wire ram_cs;
+wire vblank_cs;
+wire int_en_cs;
+wire tile_ofs_cs;
+wire tile_attr_cs;
+wire tile_num_cs;
+wire scroll_cs;
+wire shared_ram_cs;
+wire frame_done_cs; // word
+wire tile_palette_cs;
+wire sprite_palette_cs ;
+wire sprite_ofs_cs;
+wire sprite_cs; // *** offset needs to be auto-incremented
+wire sprite_size_cs; // *** offset needs to be auto-incremented
 
-// truxton
-//	map(0x000000, 0x03ffff).rom(); // prog_rom_1_cs
-//	map(0x080000, 0x083fff).ram(); // ram_cs
-//	map(0x1c0000, 0x1c0003).w(FUNC(toaplan1_state::tile_offsets_w)); // scroll_ofs_x_cs, scroll_ofs_y_cs
-//	map(0x1c0006, 0x1c0006).w(FUNC(toaplan1_state::fcu_flipscreen_w));
-// //	map(0x140000, 0x140001).portr("VBLANK"); frame_done_cs
+wire z80_p1_cs;
+wire z80_p2_cs;
+wire z80_dswa_cs;
+wire z80_dswb_cs;
+wire z80_system_cs;
+wire z80_tjump_cs;
+wire z80_sound0_cs;
+wire z80_sound1_cs;
 
-//	map(0x140003, 0x140003).w(FUNC(toaplan1_state::intenable_w));
-//	map(0x140008, 0x14000f).w(FUNC(toaplan1_state::bcu_control_w));
-//	map(0x144000, 0x1447ff).ram().w(FUNC(toaplan1_state::bgpalette_w)).share("bgpalette"); //  tile_palette_cs
-//	map(0x146000, 0x1467ff).ram().w(FUNC(toaplan1_state::fgpalette_w)).share("fgpalette"); //  sprite_palette_cs
-//	map(0x180000, 0x180fff).rw(FUNC(toaplan1_state::shared_r), FUNC(toaplan1_state::shared_w)).umask16(0x00ff); // shared_ram_cs
-//	map(0x100001, 0x100001).w(FUNC(toaplan1_state::bcu_flipscreen_w));
-//	map(0x100002, 0x100003).rw(FUNC(toaplan1_state::tileram_offs_r), FUNC(toaplan1_state::tileram_offs_w)); // tile_ofs_cs
-//	map(0x100004, 0x100007).rw(FUNC(toaplan1_state::tileram_r), FUNC(toaplan1_state::tileram_w)); // tile_attr_cs, tile_num_cs
-//	map(0x100010, 0x10001f).rw(FUNC(toaplan1_state::scroll_regs_r), FUNC(toaplan1_state::scroll_regs_w)); // scroll_cs
-//	map(0x0c0000, 0x0c0001).r(FUNC(toaplan1_state::frame_done_r)); // vblank_cs
-//	map(0x0c0002, 0x0c0003).rw(FUNC(toaplan1_state::spriteram_offs_r), FUNC(toaplan1_state::spriteram_offs_w)); // sprite_ofs_cs
-//	map(0x0c0004, 0x0c0005).rw(FUNC(toaplan1_state::spriteram_r), FUNC(toaplan1_state::spriteram_w)); // sprite_cs
-//	map(0x0c0006, 0x0c0007).rw(FUNC(toaplan1_state::spritesizeram_r), FUNC(toaplan1_state::spritesizeram_w)); // sprite_size_cs
 
-//	map(0x1d0001, 0x1d0001).w(FUNC(toaplan1_state::reset_sound_w));
+// Select PCB Title and set chip select lines
+reg   [7:0] pcb;
+wire [15:0] scroll_y_offset;
 
-// 68k address decoder
+always @(posedge clk_sys)
+    if (ioctl_wr && (ioctl_index==1))
+        pcb <= ioctl_dout;
 
-wire prog_rom_1_cs   = ( cpu_a <= 24'h03ffff ) & !cpu_as_n  ;
-// wire prog_rom_2_cs   = ( cpu_a >= 24'h040000 && cpu_a <= 24'h07ffff ) & !cpu_as_n  ;
-
-wire scroll_ofs_x_cs = ( cpu_a >= 24'h1c0000 && cpu_a <= 24'h1c0001 ) & !cpu_as_n  ;
-wire scroll_ofs_y_cs = ( cpu_a >= 24'h1c0002 && cpu_a <= 24'h1c0003 ) & !cpu_as_n  ;
-
-wire ram_cs          = ( cpu_a >= 24'h080000 && cpu_a <= 24'h083fff ) & !cpu_as_n  ;
-
-wire frame_done_cs   = ( cpu_a >= 24'h140000 && cpu_a <= 24'h140001 ) & !cpu_as_n  ;
-
-wire int_en_cs       = ( cpu_a >= 24'h400002 && cpu_a <= 24'h400003 ) & !cpu_as_n  ; // ?
-wire start_cs        = ( cpu_a >= 24'h400004 && cpu_a <= 24'h400005 ) & !cpu_as_n  ; // ?
-
-wire tile_ofs_cs     = ( cpu_a >= 24'h100002 && cpu_a <= 24'h100003 ) & !cpu_as_n  ;
-
-wire tile_attr_cs    = ( cpu_a >= 24'h100004 && cpu_a <= 24'h100005 ) & !cpu_as_n  ;
-wire tile_num_cs     = ( cpu_a >= 24'h100006 && cpu_a <= 24'h100007 ) & !cpu_as_n  ;
-
-wire scroll_cs       = ( cpu_a >= 24'h100010 && cpu_a <= 24'h10001f ) & !cpu_as_n  ;
-
-wire shared_ram_cs   = ( cpu_a >= 24'h180000 && cpu_a <= 24'h180fff ) & !cpu_as_n  ;
-
-wire vblank_cs       = ( cpu_a >= 24'h0c0000 && cpu_a <= 24'h0c0001 ) & !cpu_as_n  ;  // word
-
-wire tile_palette_cs   = ( cpu_a >= 24'h144000 && cpu_a <= 24'h1447ff ) & !cpu_as_n  ;
-wire sprite_palette_cs = ( cpu_a >= 24'h146000 && cpu_a <= 24'h1467ff ) & !cpu_as_n  ;
-
-wire sprite_ofs_cs    = ( cpu_a >= 24'h0c0002 && cpu_a <= 24'h0c0003 ) & !cpu_as_n  ;
-wire sprite_cs        = ( cpu_a >= 24'h0c0004 && cpu_a <= 24'h0c0005 ) & !cpu_as_n  ; // *** offset needs to be auto-incremented
-wire sprite_size_cs   = ( cpu_a >= 24'h0c0006 && cpu_a <= 24'h0c0007 ) & !cpu_as_n  ; // *** offset needs to be auto-incremented
+chip_select cs (.*);
 
 wire sprite_0_cs      = ( curr_sprite_ofs[1:0] == 2'b00 ) & sprite_cs ;
 wire sprite_1_cs      = ( curr_sprite_ofs[1:0] == 2'b01 ) & sprite_cs ;
@@ -819,36 +779,6 @@ wire sprite_3_cs      = ( curr_sprite_ofs[1:0] == 2'b11 ) & sprite_cs ;
 
 wire sound_rom_1_cs   = ( MREQ_n == 0 && z80_addr <= 16'h7fff )  ;
 wire sound_ram_1_cs   = ( MREQ_n == 0 && z80_addr >= 16'h8000 && z80_addr <= 16'h87ff ) ;
-
-//	map.global_mask(0xff);
-//	map(0x00, 0x00).portr("P1");
-//	map(0x08, 0x08).portr("P2");
-//	map(0x20, 0x20).portr("DSWA");
-//	map(0x28, 0x28).portr("DSWB");
-//	map(0x80, 0x80).portr("SYSTEM");
-//	map(0x88, 0x88).portr("TJUMP");
-//	map(0xa0, 0xa0).w(FUNC(toaplan1_state::coin_w));  /* Coin counter/lockout */
-//	map(0xa8, 0xa9).rw("ymsnd", FUNC(ym3812_device::read), FUNC(ym3812_device::write));
-
-// truxton
-//	map.global_mask(0xff);
-//	map(0x00, 0x00).portr("P1");
-//	map(0x10, 0x10).portr("P2");
-//	map(0x40, 0x40).portr("DSWA");
-//	map(0x50, 0x50).portr("DSWB");
-//	map(0x20, 0x20).portr("SYSTEM");
-//	map(0x70, 0x70).portr("TJUMP");
-//	map(0x30, 0x30).w(FUNC(toaplan1_state::coin_w));  /* Coin counter/lockout */
-//	map(0x60, 0x61).rw("ymsnd", FUNC(ym3812_device::read), FUNC(ym3812_device::write));
-
-wire sound_io_00_cs   = ( IORQ_n == 0 && z80_addr[7:0] == 8'h00 ) ; // P1
-wire sound_io_08_cs   = ( IORQ_n == 0 && z80_addr[7:0] == 8'h10 ) ; // P2
-wire sound_io_20_cs   = ( IORQ_n == 0 && z80_addr[7:0] == 8'h40 ) ; // DSWA
-wire sound_io_28_cs   = ( IORQ_n == 0 && z80_addr[7:0] == 8'h50 ) ; // DSWB
-wire sound_io_80_cs   = ( IORQ_n == 0 && z80_addr[7:0] == 8'h20 ) ; // SYSTEM
-wire sound_io_88_cs   = ( IORQ_n == 0 && z80_addr[7:0] == 8'h70 ) ; // TJUMP
-wire sound_io_a8_cs   = ( IORQ_n == 0 && z80_addr[7:0] == 8'h60 ) ; // sound
-wire sound_io_a9_cs   = ( IORQ_n == 0 && z80_addr[7:0] == 8'h61 ) ; // sound
 
 reg int_en ;
 reg int_ack ;
@@ -912,7 +842,8 @@ always @ (posedge clk_sys) begin
             end
 
             if ( sprite_ofs_cs ) begin
-                curr_sprite_ofs <= cpu_dout;
+                // mask out valid range
+                curr_sprite_ofs <= { 6'b0, cpu_dout[9:0] };
             end
 
             if ( scroll_ofs_x_cs ) begin
@@ -1009,7 +940,7 @@ wire        tile_hidden      = tile_attr[15] ;
 reg  [15:0] fb_dout;
 wire [15:0] tile_fb_out;
 wire [15:0] sprite_fb_out;
-reg  [15:0] fb_din ;
+reg  [15:0] fb_din;
 reg  [15:0] sprite_fb_din ;
 
 reg tile_fb_w;
@@ -1045,8 +976,18 @@ ram1kx16dp sprite_line_buffer (
     .q_b ( sprite_fb_out )
     );
 
-reg [8:0] x_ofs,x;
-reg [8:0] y_ofs,y;
+reg [9:0] x_ofs;
+reg [9:0] x;
+
+reg [9:0] y_ofs;
+
+// y needs to be one line ahaed of the visible line
+// render the first line at the end of the previous frame
+// this depends on the timing that the sprite list is valid
+// sprites values are copied at the start of vblank (line 240)
+
+reg [9:0] y ;
+
 
 reg [3:0] draw_state ;
 reg [3:0] sprite_state ;
@@ -1054,8 +995,8 @@ reg [3:0] tile_copy_state ;
 reg [3:0] sprite_copy_state ;
 
 
-wire [8:0] curr_x = x + x_ofs ;
-wire [8:0] curr_y = y + y_ofs ;
+wire [9:0] curr_x = x + x_ofs;
+wire [9:0] curr_y = y + y_ofs;
 
 // pixel 4 bit colour
 wire [3:0] tile_pix ;
@@ -1065,7 +1006,8 @@ wire [2:0] sprite_bit = sprite_x[2:0];
 wire [3:0] sprite_pix ;
 assign sprite_pix = { sprite_data[7-sprite_bit], sprite_data[15-sprite_bit], sprite_data[23-sprite_bit], sprite_data[31-sprite_bit] };
 
-wire [9:0] tile_fb_addr_w   = { y[0], 9'b0 } + x ;
+// two lines of buffer alternate
+reg  [9:0] tile_fb_addr_w;
 wire [9:0] fb_addr_r        = {vc[0], 9'b0 } + hc;
 
 reg [9:0] sprite_fb_addr_w ;
@@ -1089,21 +1031,24 @@ reg  [9:0] sprite_y;
 reg  sprite_buf_active;
 wire [9:0] sprite_buf_x = sprite_x + sprite_pos_x ;     // offset from left of frame
 
-wire       sprite_hidden    = sprite_attr_0_buf_dout[15] /* synthesis keep */;
-wire [14:0] sprite_index    = sprite_attr_0_buf_dout[14:0] /* synthesis keep */;
+wire fetch_tile = layer == 3 || ( tile_priority_buf[x] <= tile_priority && tile_hidden == 0 );
 
-wire [3:0] sprite_priority  = sprite_attr_1_buf_dout[15:12] /* synthesis keep */;
-wire [5:0] sprite_size_addr = sprite_attr_1_buf_dout[11:6] /* synthesis keep */;
+wire [14:0] sprite_index    = sprite_attr_0_buf_dout[14:0] /* synthesis keep */;
+wire       sprite_hidden    = sprite_attr_0_buf_dout[15] /* synthesis keep */;
 //reg [5:0] sprite_size_addr;
 
 wire [5:0] sprite_pal_addr  = sprite_attr_1_buf_dout[5:0] /* synthesis keep */;
+wire [5:0]  sprite_size_addr = sprite_attr_1_buf_dout[11:6] /* synthesis keep */;
+wire [3:0]  sprite_priority  = sprite_attr_1_buf_dout[15:12] /* synthesis keep */;
 
-wire [8:0] sprite_pos_x  = sprite_attr_2_buf_dout[15:7]  ;
-wire [8:0] sprite_pos_y  = sprite_attr_3_buf_dout[15:7] - 16/* synthesis keep */;
+wire [9:0] sprite_pos_x  = ( sprite_attr_2_buf_dout[15:7] < 9'h180 ) ? sprite_attr_2_buf_dout[15:7]  : ( sprite_attr_2_buf_dout[15:7] - 9'h1fe )  ;
+wire [9:0] sprite_pos_y  = ( sprite_attr_3_buf_dout[15:7] < 9'h180 ) ? sprite_attr_3_buf_dout[15:7]  : ( sprite_attr_3_buf_dout[15:7] - 9'h1fe )  ;  //- 16 + scroll_y_offset /* synthesis keep */; )
 
 // valid 1 cycle after sprite attr ready
-wire [8:0] sprite_height    = { sprite_size_dout[7:4], 3'b0 } /* synthesis keep */;  // in pixels
-wire [8:0] sprite_width     = { sprite_size_dout[3:0], 3'b0 } /* synthesis keep */;
+wire [8:0] sprite_height    = { sprite_size_buf_dout[7:4], 3'b0 } /* synthesis keep */;  // in pixels
+wire [8:0] sprite_width     = { sprite_size_buf_dout[3:0], 3'b0 } /* synthesis keep */;
+
+reg [7:0] sprite_buf_num;
 
 always @ (posedge clk_sys) begin
 
@@ -1130,7 +1075,7 @@ always @ (posedge clk_sys) begin
             // erase line buffer
             sprite_fb_addr_w <= { y[0], 9'b0 } + sprite_x ;
             sprite_priority_buf[sprite_x] <= 0;
-            if ( sprite_x < 319 ) begin
+            if ( sprite_x < 320 ) begin
                 sprite_x <= sprite_x + 1;
             end else begin
                 sprite_x <= 0;
@@ -1153,11 +1098,14 @@ always @ (posedge clk_sys) begin
             sprite_y <= ( y - sprite_pos_y ) ;
 
             // is sprite visible and is current y in sprite y range
-            if ( sprite_hidden == 0 && sprite_width > 0 && y >= sprite_pos_y && y < ( sprite_pos_y + sprite_height ) ) begin
+			// sprite pos can be negative
+            if ( sprite_hidden == 0 && sprite_width > 0 && ( $signed(y) >= $signed(sprite_pos_y) ) && $signed(y) < ( $signed(sprite_pos_y) + $signed(sprite_height) ) ) begin
                 sprite_state <= 5 ;
-            end else begin
+            end else if ( sprite_num > 0 ) begin
                 sprite_num <= sprite_num - 1;
                 sprite_state <= 2 ;
+            end else begin
+                sprite_state <= 15 ;
             end
 
         end else if ( sprite_state == 5 ) begin
@@ -1175,7 +1123,7 @@ always @ (posedge clk_sys) begin
         end else if ( sprite_state == 7 ) begin
             sprite_fb_w <= 0;
             // draw if pixel value not zero and priority >= previous sprite data
-            if ( sprite_pix > 0 && sprite_priority_buf[sprite_buf_x] < sprite_priority ) begin
+            if ( sprite_pix > 0 && sprite_priority_buf[sprite_buf_x] == 0 ) begin
                 sprite_fb_din <= { 2'b11, sprite_priority, sprite_pal_addr, sprite_pix };
                 sprite_fb_addr_w <= { y[0], 9'b0 } + sprite_buf_x ;
                 sprite_priority_buf[sprite_buf_x] <= sprite_priority ;
@@ -1211,32 +1159,30 @@ always @ (posedge clk_sys) begin
             scroll_x_latch[2] <= scroll_x[2] - scroll_ofs_x;
             scroll_x_latch[3] <= scroll_x[3] - scroll_ofs_x;
 
-            scroll_y_latch[0] <= scroll_y[0] - scroll_ofs_y;
-            scroll_y_latch[1] <= scroll_y[1] - scroll_ofs_y;
-            scroll_y_latch[2] <= scroll_y[2] - scroll_ofs_y;
-            scroll_y_latch[3] <= scroll_y[3] - scroll_ofs_y;
+            scroll_y_latch[0] <= scroll_y[0] - scroll_ofs_y - scroll_y_offset;
+            scroll_y_latch[1] <= scroll_y[1] - scroll_ofs_y - scroll_y_offset;
+            scroll_y_latch[2] <= scroll_y[2] - scroll_ofs_y - scroll_y_offset;
+            scroll_y_latch[3] <= scroll_y[3] - scroll_ofs_y - scroll_y_offset;
 
         end
 
+        // copy sprite attr/size to buffer
         if (  sprite_copy_state == 0 && vc == 240  ) begin
             sprite_copy_state <= 1;
-        end else if ( sprite_copy_state == 1 ) begin
+            sprite_buf_w <= 0;
             sprite_num_copy <= 8'h00;
-            sprite_copy_state <= 2 ;
-        end else if ( sprite_copy_state == 2 ) begin
+        end else if ( sprite_copy_state == 1 ) begin
+            sprite_num_copy <= sprite_num_copy + 1;
+            sprite_buf_num <= sprite_num_copy;
             sprite_buf_w <= 1;
 
             // wait for read from source
-            sprite_copy_state <= 3 ;
-        end else if ( sprite_copy_state == 3 ) begin
-            sprite_buf_w <= 0;
-            sprite_copy_state <= 2 ;
-
-            if ( sprite_num_copy < 8'hff ) begin
-                sprite_num_copy <= sprite_num_copy + 1;
-            end else begin
-                sprite_copy_state <= 0; // till next time
+            if ( sprite_num_copy == 8'hff ) begin
+                sprite_copy_state <= 2 ;
             end
+        end else if ( sprite_copy_state == 2 ) begin
+            sprite_buf_w <= 0;
+            sprite_copy_state <= 0 ;
         end
 
         // tile state machine
@@ -1288,6 +1234,8 @@ always @ (posedge clk_sys) begin
             end else if ( tile_draw_state == 5 ) begin
 
                 tile_fb_w <= 0;
+                tile_fb_addr_w   <= { y[0], 9'b0 } + x ;
+
                 // force render of first layer.
                 // don't draw transparent pixels
                 if ( layer == 3 ) begin
@@ -1297,7 +1245,7 @@ always @ (posedge clk_sys) begin
                     // if tile hidden then make the pallette index 0. ie transparent
                     fb_din <= { layer, (tile_hidden == 1 || tile_pix == 0 ) ? 4'b0 : tile_priority, tile_palette_idx,  tile_pix };
                     tile_fb_w <= 1;
-                end else if (tile_hidden == 0 && tile_pix > 0 && tile_priority >= tile_priority_buf[x]) begin
+                end else if (tile_hidden == 0 && tile_pix > 0 && tile_priority > tile_priority_buf[x]) begin
                     tile_priority_buf[x] <= tile_priority;
 
                     // if tile hidden then make the pallette index 0. ie transparent
@@ -1305,7 +1253,7 @@ always @ (posedge clk_sys) begin
                     tile_fb_w <= 1;
                 end
 
-                if ( x < 319 ) begin // 319
+                if ( x < 320 ) begin // 319
                     // do we need to read another tile?
                     if ( curr_x[2:0] == 7 ) begin
                         draw_state <= 3;
@@ -1348,12 +1296,12 @@ reg draw_sprite;
 // there are 10 70MHz cycles per pixel. clk7_count from 0-9
 //
 always @ (posedge clk_sys) begin
-    if ( clk7_count == 5 ) begin
-        tile_palette_addr   <= tile_fb_out[9:0] ;
+    if ( clk7_count == 4 ) begin
+        tile_palette_addr  <= tile_fb_out[9:0] ;
         sprite_palette_addr <= sprite_fb_out[9:0] ;
-    end else if ( clk7_count == 7 ) begin
-        if ( vbl | hbl ) begin
-            rgb_out <= 0;
+    end else if ( clk7_count == 6 ) begin
+        if ( vbl ) begin
+            rgb_out <= { 8'hee, 7'h0, hc };
         end else begin
             // if palette index is zero then it's from layer 3 and is transparent render as blank (black).
             rgb_out <= ( tile_fb_out[3:0] == 0 ) ? 0 : { tile_palette_dout[4:0], 3'b0, tile_palette_dout[9:5], 3'b0, tile_palette_dout[14:10], 3'b0 };
@@ -1401,23 +1349,15 @@ wire        sdram_ack;
 wire        sdram_valid;
 wire [31:0] sdram_q;
 
-wire prog_rom_1_data_valid;
-// wire prog_rom_2_data_valid;
+wire prog_rom_data_valid;
 wire tile_rom_data_valid;
 wire sprite_rom_data_valid;
 wire sound_rom_1_data_valid;
 
-//wire prog_rom_1_cs;
-wire prog_rom_1_oe;
-wire [23:1] prog_rom_1_addr;
-wire [15:0] prog_rom_1_data;
-wire prog_rom_1_ctrl_valid;
-
-//wire prog_rom_2_cs;
-// wire prog_rom_2_oe;
-// wire [23:1] prog_rom_2_addr;
-// wire [15:0] prog_rom_2_data;
-// wire prog_rom_2_ctrl_valid;
+wire prog_rom_oe;
+wire [23:1] prog_rom_addr;
+wire [15:0] prog_rom_data;
+wire prog_rom_ctrl_valid;
 
 reg tile_rom_cs;
 reg tile_rom_oe;
@@ -1438,10 +1378,6 @@ wire [15:0] sound_rom_1_addr;
 wire [7:0] sound_rom_1_data;
 wire sound_rom_1_ctrl_valid;
 
-// wire [23:0] rom_2_addr = cpu_a - 24'h040000  ;
-
-wire [23:0] rom_1_addr = cpu_a - 24'h000000  ;
-
 // sdram priority based rom controller
 // is a oe needed?
 rom_controller rom_controller
@@ -1451,19 +1387,12 @@ rom_controller rom_controller
     // clock
     .clk(clk_sys),
 
-    // program ROM #1 interface
-    .prog_rom_1_cs(prog_rom_1_cs),
-    .prog_rom_1_oe(1),
-    .prog_rom_1_addr(cpu_a[23:1]),
-    .prog_rom_1_data(prog_rom_1_data),
-    .prog_rom_1_data_valid(prog_rom_1_data_valid),
-
-    // program ROM #2 interface
-//    .prog_rom_2_cs(prog_rom_2_cs),
-//    .prog_rom_2_oe(1),
-//    .prog_rom_2_addr( rom_2_addr[23:1] ),
-//    .prog_rom_2_data(prog_rom_2_data),
-//    .prog_rom_2_data_valid(prog_rom_2_data_valid),
+    // program ROM interface
+    .prog_rom_cs(prog_rom_cs),
+    .prog_rom_oe(1),
+    .prog_rom_addr(cpu_a[23:1]),
+    .prog_rom_data(prog_rom_data),
+    .prog_rom_data_valid(prog_rom_data_valid),
 
     // character ROM interface
     .tile_rom_cs(tile_rom_cs),
@@ -1550,6 +1479,19 @@ ram256bx16dp sprite_ram_0 (
     .q_b ( sprite_attr_0_dout[15:0] )
     );
 
+ram256bx16dp sprite_ram_0_buf (
+    .clock_a ( clk_sys ),
+    .address_a ( sprite_buf_num ),
+    .wren_a ( sprite_buf_w ),
+    .data_a ( sprite_attr_0_dout[15:0] ),
+    .q_a (  ),
+
+    .clock_b ( clk_sys ),
+    .address_b ( sprite_num ),
+    .wren_b ( 0 ),
+    .q_b ( sprite_attr_0_buf_dout[15:0] )
+    );
+
 ram256bx16dp sprite_ram_1 (
     .clock_a ( clk_10M ),
     .address_a ( curr_sprite_ofs[9:2] ),
@@ -1561,6 +1503,19 @@ ram256bx16dp sprite_ram_1 (
     .address_b ( sprite_num_copy ),
     .wren_b ( 0 ),
     .q_b ( sprite_attr_1_dout[15:0] )
+    );
+
+ram256bx16dp sprite_ram_1_buf (
+    .clock_a ( clk_sys ),
+    .address_a ( sprite_buf_num ),
+    .wren_a ( sprite_buf_w ),
+    .data_a ( sprite_attr_1_dout[15:0] ),
+    .q_a (  ),
+
+    .clock_b ( clk_sys ),
+    .address_b ( sprite_num ),
+    .wren_b ( 0 ),
+    .q_b ( sprite_attr_1_buf_dout[15:0] )
     );
 
 ram256bx16dp sprite_ram_2 (
@@ -1576,6 +1531,19 @@ ram256bx16dp sprite_ram_2 (
     .q_b ( sprite_attr_2_dout[15:0] )
     );
 
+ram256bx16dp sprite_ram_2_buf (
+    .clock_a ( clk_sys ),
+    .address_a ( sprite_buf_num ),
+    .wren_a ( sprite_buf_w ),
+    .data_a ( sprite_attr_2_dout[15:0] ),
+    .q_a (  ),
+
+    .clock_b ( clk_sys ),
+    .address_b ( sprite_num ),
+    .wren_b ( 0 ),
+    .q_b ( sprite_attr_2_buf_dout[15:0] )
+    );
+
 ram256bx16dp sprite_ram_3 (
     .clock_a ( clk_10M ),
     .address_a ( curr_sprite_ofs[9:2] ),
@@ -1589,67 +1557,9 @@ ram256bx16dp sprite_ram_3 (
     .q_b ( sprite_attr_3_dout[15:0] )
     );
 
-ram256bx16dp sprite_ram_size (
-    .clock_a ( clk_10M ),
-    .address_a ( curr_sprite_ofs ),
-    .wren_a ( sprite_size_cs  & !cpu_rw),
-    .data_a ( cpu_dout ),
-    .q_a ( sprite_size_cpu_dout ),
-
-    .clock_b ( clk_sys ),
-    .address_b ( sprite_size_addr ),
-    .wren_b ( 0 ),
-    .q_b ( sprite_size_dout )
-    );
-
-
-
-
-// sprite attribute ram.  each tile attribute is 4 16bit words
-// indirect access through offset register
-// split up so 64 bits can be read in a single clock
-ram256bx16dp sprite_ram_0_buf (
-    .clock_a ( clk_sys ),
-    .address_a ( sprite_num_copy ),
-    .wren_a ( sprite_buf_w ),
-    .data_a ( sprite_attr_0_dout[15:0] ),
-    .q_a (  ),
-
-    .clock_b ( clk_sys ),
-    .address_b ( sprite_num ),
-    .wren_b ( 0 ),
-    .q_b ( sprite_attr_0_buf_dout[15:0] )
-    );
-
-ram256bx16dp sprite_ram_1_buf (
-    .clock_a ( clk_sys ),
-    .address_a ( sprite_num_copy ),
-    .wren_a ( sprite_buf_w ),
-    .data_a ( sprite_attr_1_dout[15:0] ),
-    .q_a (  ),
-
-    .clock_b ( clk_sys ),
-    .address_b ( sprite_num ),
-    .wren_b ( 0 ),
-    .q_b ( sprite_attr_1_buf_dout[15:0] )
-    );
-
-ram256bx16dp sprite_ram_2_buf (
-    .clock_a ( clk_sys ),
-    .address_a ( sprite_num_copy ),
-    .wren_a ( sprite_buf_w ),
-    .data_a ( sprite_attr_2_dout[15:0] ),
-    .q_a (  ),
-
-    .clock_b ( clk_sys ),
-    .address_b ( sprite_num ),
-    .wren_b ( 0 ),
-    .q_b ( sprite_attr_2_buf_dout[15:0] )
-    );
-
 ram256bx16dp sprite_ram_3_buf (
     .clock_a ( clk_sys ),
-    .address_a ( sprite_num_copy ),
+    .address_a ( sprite_buf_num ),
     .wren_a ( sprite_buf_w ),
     .data_a ( sprite_attr_3_dout[15:0] ),
     .q_a (  ),
@@ -1660,6 +1570,32 @@ ram256bx16dp sprite_ram_3_buf (
     .q_b ( sprite_attr_3_buf_dout[15:0] )
     );
 
+ram256bx16dp sprite_ram_size (
+    .clock_a ( clk_10M ),
+    .address_a ( curr_sprite_ofs ),
+    .wren_a ( sprite_size_cs  & !cpu_rw),
+    .data_a ( cpu_dout ),
+    .q_a ( sprite_size_cpu_dout ),
+
+    .clock_b ( clk_sys ),
+    .address_b ( sprite_num_copy ),
+    .wren_b ( 0 ),
+    .q_b ( sprite_size_dout )
+    );
+
+ram256bx16dp sprite_ram_size_buf (
+    .clock_a ( clk_sys ),
+    .address_a ( sprite_buf_num ),
+    .wren_a ( sprite_buf_w ),
+    .data_a ( sprite_size_dout ),
+    .q_a (  ),
+
+    .clock_b ( clk_sys ),
+    .address_b ( sprite_size_addr ),
+    .wren_b ( 0 ),
+    .q_b ( sprite_size_buf_dout )
+
+    );
 
 
 // tiles  1024 15 bit values.  index is ( 6 bits from tile attribute, 4 bits from bitmap )
